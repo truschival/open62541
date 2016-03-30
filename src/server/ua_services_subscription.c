@@ -8,50 +8,79 @@
     else DST = SRC; \
     }
 
+static void
+setSubscriptionSettings(UA_Server *server, UA_Subscription *subscription,
+                        UA_Double requestedPublishingInterval,
+                        UA_UInt32 requestedLifetimeCount,
+                        UA_UInt32 requestedMaxKeepAliveCount,
+                        UA_UInt32 maxNotificationsPerPublish, UA_Byte priority) {
+    Subscription_unregisterUpdateJob(server, subscription);
+    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.publishingIntervalLimits,
+                               requestedPublishingInterval, subscription->publishingInterval);
+    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.lifeTimeCountLimits,
+                               requestedLifetimeCount, subscription->lifeTime);
+    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.keepAliveCountLimits,
+                               requestedMaxKeepAliveCount, subscription->maxKeepAliveCount);
+    subscription->notificationsPerPublish = maxNotificationsPerPublish;
+    subscription->priority = priority;
+    Subscription_registerUpdateJob(server, subscription);
+}
+
 void Service_CreateSubscription(UA_Server *server, UA_Session *session,
                                 const UA_CreateSubscriptionRequest *request,
                                 UA_CreateSubscriptionResponse *response) {
     response->subscriptionId = UA_Session_getUniqueSubscriptionID(session);
-    UA_Subscription *newSubscription = UA_Subscription_new(response->subscriptionId);
+    UA_Subscription *newSubscription = UA_Subscription_new(session, response->subscriptionId);
     if(!newSubscription) {
         response->responseHeader.serviceResult = UA_STATUSCODE_BADOUTOFMEMORY;
         return;
     }
-    
-    /* set the publishing interval */
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.publishingIntervalLimits,
-                               request->requestedPublishingInterval, response->revisedPublishingInterval);
-    newSubscription->publishingInterval = response->revisedPublishingInterval;
-    
-    /* set the subscription lifetime (deleted when no publish requests arrive within this time) */
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.lifeTimeCountLimits,
-                               request->requestedLifetimeCount, response->revisedLifetimeCount);
-    newSubscription->lifeTime = (UA_BoundedUInt32)  {
-        .min = server->config.lifeTimeCountLimits.min,
-        .max = server->config.lifeTimeCountLimits.max,
-        .current=response->revisedLifetimeCount};
-    
-    /* set the keepalive count. the server sends an empty notification when
-       nothin has happened for n publishing intervals */
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.keepAliveCountLimits,
-                               request->requestedMaxKeepAliveCount, response->revisedMaxKeepAliveCount);
-    newSubscription->keepAliveCount = (UA_BoundedUInt32)  {
-        .min = server->config.keepAliveCountLimits.min,
-        .max = server->config.keepAliveCountLimits.max,
-        .current = response->revisedMaxKeepAliveCount};
-    
-    newSubscription->notificationsPerPublish = request->maxNotificationsPerPublish;
-    newSubscription->publishingMode          = request->publishingEnabled;
-    newSubscription->priority                = request->priority;
-    
-    /* add the update job */
-    Subscription_registerUpdateJob(server, newSubscription);
     UA_Session_addSubscription(session, newSubscription);    
+    newSubscription->publishingMode = request->publishingEnabled;
+    setSubscriptionSettings(server, newSubscription, request->requestedPublishingInterval,
+                            request->requestedLifetimeCount, request->requestedMaxKeepAliveCount,
+                            request->maxNotificationsPerPublish, request->priority);
+    response->revisedPublishingInterval = newSubscription->publishingInterval;
+    response->revisedLifetimeCount = newSubscription->lifeTime;
+    response->revisedMaxKeepAliveCount = newSubscription->maxKeepAliveCount;
+}
+
+void Service_ModifySubscription(UA_Server *server, UA_Session *session,
+                                const UA_ModifySubscriptionRequest *request,
+                                UA_ModifySubscriptionResponse *response) {
+    UA_Subscription *sub = UA_Session_getSubscriptionByID(session, request->subscriptionId);
+    if(!sub) {
+        response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
+        return;
+    }
+    setSubscriptionSettings(server, sub, request->requestedPublishingInterval,
+                            request->requestedLifetimeCount, request->requestedMaxKeepAliveCount,
+                            request->maxNotificationsPerPublish, request->priority);
+    response->revisedPublishingInterval = sub->publishingInterval;
+    response->revisedLifetimeCount = sub->lifeTime;
+    response->revisedMaxKeepAliveCount = sub->maxKeepAliveCount;
+    return;
+}
+
+static void
+setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
+                         UA_MonitoringMode monitoringMode, UA_UInt32 clientHandle,
+                         UA_Double samplingInterval, UA_UInt32 queueSize, UA_Boolean discardOldest) {
+    MonitoredItem_unregisterSampleJob(server, mon);
+    mon->monitoringMode = monitoringMode;
+    mon->clientHandle = clientHandle;
+    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.samplingIntervalLimits,
+                               samplingInterval, mon->samplingInterval);
+    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.queueSizeLimits,
+                               queueSize, mon->maxQueueSize);
+    mon->discardOldest = discardOldest;
+    MonitoredItem_registerSampleJob(server, mon);
 }
 
 static void
 createMonitoredItem(UA_Server *server, UA_Session *session, UA_Subscription *sub,
-                    const UA_MonitoredItemCreateRequest *request, UA_MonitoredItemCreateResult *result) {
+                    const UA_MonitoredItemCreateRequest *request,
+                    UA_MonitoredItemCreateResult *result) {
     const UA_Node *target = UA_NodeStore_get(server->nodestore, &request->itemToMonitor.nodeId);
     if(!target) {
         result->statusCode = UA_STATUSCODE_BADNODEIDINVALID;
@@ -66,38 +95,23 @@ createMonitoredItem(UA_Server *server, UA_Session *session, UA_Subscription *sub
 
     UA_StatusCode retval = UA_NodeId_copy(&target->nodeId, &newMon->monitoredNodeId);
     if(retval != UA_STATUSCODE_GOOD) {
-        result->statusCode = UA_STATUSCODE_BADOUTOFMEMORY;
+        result->statusCode = retval;
         MonitoredItem_delete(server, newMon);
         return;
     }
 
-    newMon->itemId = UA_Session_getUniqueSubscriptionID(session);
-    result->monitoredItemId = newMon->itemId;
-    newMon->clientHandle = request->requestedParameters.clientHandle;
-
-    /* set the sampling interval */
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.samplingIntervalLimits,
-                               request->requestedParameters.samplingInterval,
-                               result->revisedSamplingInterval);
-    newMon->samplingInterval = (UA_UInt32)result->revisedSamplingInterval;
-
-    /* set the queue size */
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.queueSizeLimits,
-                               request->requestedParameters.queueSize,
-                               result->revisedQueueSize);
-    newMon->queueSize = (UA_BoundedUInt32) {
-        .max=(result->revisedQueueSize) + 1,
-        .min=0, .current=0 };
-
     newMon->attributeID = request->itemToMonitor.attributeId;
-    newMon->monitoredItemType = MONITOREDITEM_TYPE_CHANGENOTIFY;
-    newMon->discardOldest = request->requestedParameters.discardOldest;
+    newMon->itemId = UA_Session_getUniqueSubscriptionID(session);
+    setMonitoredItemSettings(server, newMon, MONITOREDITEM_TYPE_CHANGENOTIFY,
+                             request->requestedParameters.clientHandle,
+                             request->requestedParameters.samplingInterval,
+                             request->requestedParameters.queueSize,
+                             request->requestedParameters.discardOldest);
+
+    result->revisedSamplingInterval = newMon->samplingInterval;
+    result->revisedQueueSize = newMon->maxQueueSize;
+    result->monitoredItemId = newMon->itemId;
     LIST_INSERT_HEAD(&sub->MonitoredItems, newMon, listEntry);
-
-    // todo: handle return code
-    MonitoredItem_registerSampleJob(server, newMon);
-
-    // todo: add a job that samples the value (for fixed intervals)
     // todo: add a pointer to the monitoreditem to the variable, so that events get propagated
 }
 
@@ -206,7 +220,6 @@ Service_Publish(UA_Server *server, UA_Session *session, const UA_PublishRequest 
         sub = LIST_FIRST(&session->serverSubscriptions);
         if(sub) {
             response.subscriptionId = sub->subscriptionID;
-            sub->keepAliveCount.current=sub->keepAliveCount.min;
             Subscription_generateKeepAlive(sub);
             Subscription_copyNotificationMessage(&response.notificationMessage,
                                                  LIST_FIRST(&sub->unpublishedNotifications));
@@ -221,41 +234,6 @@ Service_Publish(UA_Server *server, UA_Session *session, const UA_PublishRequest 
     UA_PublishResponse_deleteMembers(&response);
 }
 
-void
-Service_ModifySubscription(UA_Server *server, UA_Session *session, const UA_ModifySubscriptionRequest *request,
-                           UA_ModifySubscriptionResponse *response) {
-    UA_Subscription *sub = UA_Session_getSubscriptionByID(session, request->subscriptionId);
-    if(!sub) {
-        response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
-        return;
-    }
-    
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.publishingIntervalLimits,
-                               request->requestedPublishingInterval, response->revisedPublishingInterval);
-    sub->publishingInterval = response->revisedPublishingInterval;
-    
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.lifeTimeCountLimits,
-                               request->requestedLifetimeCount, response->revisedLifetimeCount);
-    sub->lifeTime = (UA_BoundedUInt32)  {
-        .min = server->config.lifeTimeCountLimits.min,
-        .max = server->config.lifeTimeCountLimits.max,
-        .current=response->revisedLifetimeCount};
-        
-    UA_BOUNDEDVALUE_SETWBOUNDS(server->config.keepAliveCountLimits,
-                               request->requestedMaxKeepAliveCount, response->revisedMaxKeepAliveCount);
-    sub->keepAliveCount = (UA_BoundedUInt32)  {
-        .min = server->config.keepAliveCountLimits.min,
-        .max = server->config.keepAliveCountLimits.max,
-        .current=response->revisedMaxKeepAliveCount};
-        
-    sub->notificationsPerPublish = request->maxNotificationsPerPublish;
-    sub->priority                = request->priority;
-    
-    Subscription_unregisterUpdateJob(server, sub);
-    Subscription_registerUpdateJob(server, sub);
-    return;
-}
-
 void Service_DeleteSubscriptions(UA_Server *server, UA_Session *session,
                                  const UA_DeleteSubscriptionsRequest *request,
                                  UA_DeleteSubscriptionsResponse *response) {
@@ -267,8 +245,7 @@ void Service_DeleteSubscriptions(UA_Server *server, UA_Session *session,
     response->resultsSize = request->subscriptionIdsSize;
 
     for(size_t i = 0; i < request->subscriptionIdsSize; i++)
-        response->results[i] =
-            UA_Session_deleteSubscription(server, session, request->subscriptionIds[i]);
+        response->results[i] = UA_Session_deleteSubscription(server, session, request->subscriptionIds[i]);
 } 
 
 void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
@@ -289,8 +266,7 @@ void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
 
     for(size_t i = 0; i < request->monitoredItemIdsSize; i++)
         response->results[i] =
-            UA_Session_deleteMonitoredItem(server, session, sub->subscriptionID,
-                                           request->monitoredItemIds[i]);
+            UA_Session_deleteMonitoredItem(server, session, sub->subscriptionID, request->monitoredItemIds[i]);
 }
 
 void Service_Republish(UA_Server *server, UA_Session *session, const UA_RepublishRequest *request,

@@ -29,17 +29,18 @@ typedef struct UA_MonitoredItem {
     UA_UInt32 itemId;
     UA_MONITOREDITEM_TYPE monitoredItemType;
     UA_UInt32 timestampsToReturn;
-    UA_UInt32 monitoringMode;
+    UA_MonitoringMode monitoringMode;
     UA_NodeId monitoredNodeId; 
     UA_UInt32 attributeID;
     UA_UInt32 clientHandle;
-    UA_UInt32 samplingInterval; // [ms]
+    UA_Double samplingInterval; // [ms]
+    UA_UInt32 currentQueueSize;
+    UA_UInt32 maxQueueSize;
     UA_Boolean discardOldest;
     UA_ByteString lastSampledValue;
     // FIXME: indexRange is ignored; array values default to element 0
     // FIXME: dataEncoding is hardcoded to UA binary
     TAILQ_HEAD(QueueOfQueueDataValues, MonitoredItem_queuedValue) queue;
-    UA_BoundedUInt32 queueSize;
 } UA_MonitoredItem;
 
 UA_MonitoredItem *UA_MonitoredItem_new(void);
@@ -51,7 +52,7 @@ UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, cons
 UA_UInt32 MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotification *dst,
                                                        UA_MonitoredItem *monitoredItem);
 
-UA_StatusCode MonitoredItem_unregisterUpdateJob(UA_Server *server, UA_MonitoredItem *mon);
+UA_StatusCode MonitoredItem_unregisterSampleJob(UA_Server *server, UA_MonitoredItem *mon);
 UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredItem *mon);
 
 /****************/
@@ -66,8 +67,10 @@ typedef struct UA_unpublishedNotification {
 
 struct UA_Subscription {
     LIST_ENTRY(UA_Subscription) listEntry;
-    UA_BoundedUInt32 lifeTime;
-    UA_BoundedUInt32 keepAliveCount;
+    UA_Session *session;
+    UA_UInt32 lifeTime;
+    UA_UInt32 currentKeepAliveCount;
+    UA_UInt32 maxKeepAliveCount;
     UA_Double publishingInterval;     // [ms] 
     UA_DateTime lastPublished;
     UA_UInt32 subscriptionID;
@@ -82,7 +85,7 @@ struct UA_Subscription {
     LIST_HEAD(UA_ListOfUAMonitoredItems, UA_MonitoredItem) MonitoredItems;
 };
 
-UA_Subscription *UA_Subscription_new(UA_UInt32 subscriptionID);
+UA_Subscription *UA_Subscription_new(UA_Session *session, UA_UInt32 subscriptionID);
 void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *server);
 void Subscription_updateNotifications(UA_Subscription *subscription);
 UA_UInt32 *Subscription_getAvailableSequenceNumbers(UA_Subscription *sub);

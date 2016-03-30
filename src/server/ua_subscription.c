@@ -6,13 +6,16 @@
 /* Subscription */
 /****************/
 
-UA_Subscription *UA_Subscription_new(UA_UInt32 subscriptionID) {
+UA_Subscription *UA_Subscription_new(UA_Session *session, UA_UInt32 subscriptionID) {
     UA_Subscription *new = UA_malloc(sizeof(UA_Subscription));
     if(!new)
         return NULL;
+    new->session = session;
     new->subscriptionID = subscriptionID;
     new->lastPublished  = 0;
     new->sequenceNumber = 1;
+    new->currentKeepAliveCount = 0;
+    new->maxKeepAliveCount = 0;
     memset(&new->timedUpdateJobGuid, 0, sizeof(UA_Guid));
     new->timedUpdateIsRegistered = false;
     LIST_INIT(&new->MonitoredItems);
@@ -25,27 +28,20 @@ void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *ser
     // Just in case any parallel process attempts to access this subscription
     // while we are deleting it... make it vanish.
     subscription->subscriptionID = 0;
+    Subscription_unregisterUpdateJob(server, subscription);
     
-    // Delete monitored Items
+    /* Delete monitored Items */
     UA_MonitoredItem *mon, *tmp_mon;
     LIST_FOREACH_SAFE(mon, &subscription->MonitoredItems, listEntry, tmp_mon) {
         LIST_REMOVE(mon, listEntry);
         MonitoredItem_delete(server, mon);
     }
-    
-    // Delete unpublished Notifications
+
     Subscription_deleteUnpublishedNotification(0, true, subscription);
-    
-    // Unhook/Unregister any timed work assiociated with this subscription
-    if(subscription->timedUpdateIsRegistered) {
-        Subscription_unregisterUpdateJob(server, subscription);
-        subscription->timedUpdateIsRegistered = false;
-    }
 }
 
 void Subscription_generateKeepAlive(UA_Subscription *subscription) {
-    if(subscription->keepAliveCount.current > subscription->keepAliveCount.min &&
-       subscription->keepAliveCount.current <= subscription->keepAliveCount.max)
+    if(subscription->currentKeepAliveCount <= subscription->maxKeepAliveCount)
         return;
 
     UA_unpublishedNotification *msg = UA_calloc(1,sizeof(UA_unpublishedNotification));
@@ -54,11 +50,11 @@ void Subscription_generateKeepAlive(UA_Subscription *subscription) {
     msg->notification.notificationData = NULL;
     // KeepAlive uses next message, but does not increment counter
     msg->notification.sequenceNumber = subscription->sequenceNumber + 1;
-    msg->notification.publishTime    = UA_DateTime_now();
+    msg->notification.publishTime = UA_DateTime_now();
     msg->notification.notificationDataSize = 0;
     LIST_INSERT_HEAD(&subscription->unpublishedNotifications, msg, listEntry);
     subscription->unpublishedNotificationsSize += 1;
-    subscription->keepAliveCount.current = subscription->keepAliveCount.max;
+    subscription->currentKeepAliveCount = 0;
 }
 
 void Subscription_updateNotifications(UA_Subscription *subscription) {
@@ -78,11 +74,11 @@ void Subscription_updateNotifications(UA_Subscription *subscription) {
         if(!TAILQ_FIRST(&mon->queue))
             continue;
         if((mon->monitoredItemType & MONITOREDITEM_TYPE_CHANGENOTIFY) != 0)
-            monItemsChangeT+=mon->queueSize.current;
+            monItemsChangeT += mon->currentQueueSize;
 	    else if((mon->monitoredItemType & MONITOREDITEM_TYPE_STATUSNOTIFY) != 0)
-            monItemsStatusT+=mon->queueSize.current;
+            monItemsStatusT += mon->currentQueueSize;
 	    else if((mon->monitoredItemType & MONITOREDITEM_TYPE_EVENTNOTIFY)  != 0)
-            monItemsEventT+=mon->queueSize.current;
+            monItemsEventT += mon->currentQueueSize;
     }
     
     // FIXME: This is hardcoded to 100 because it is not covered by the spec but we need to protect the server!
@@ -93,9 +89,9 @@ void Subscription_updateNotifications(UA_Subscription *subscription) {
     
     if(monItemsChangeT == 0 && monItemsEventT == 0 && monItemsStatusT == 0) {
         // Decrement KeepAlive
-        subscription->keepAliveCount.current--;
+        subscription->currentKeepAliveCount--;
         // +- Generate KeepAlive msg if counter overruns
-        if (subscription->keepAliveCount.current < subscription->keepAliveCount.min)
+        if(subscription->currentKeepAliveCount > subscription->maxKeepAliveCount)
           Subscription_generateKeepAlive(subscription);
         
         return;
@@ -162,7 +158,7 @@ UA_UInt32 *Subscription_getAvailableSequenceNumbers(UA_Subscription *sub) {
 }
 
 void Subscription_copyNotificationMessage(UA_NotificationMessage *dst, UA_unpublishedNotification *src) {
-    if(!dst)
+    if(!dst || !src)
         return;
     
     UA_NotificationMessage *latest = &src->notification;
@@ -191,7 +187,6 @@ UA_UInt32 Subscription_deleteUnpublishedNotification(UA_UInt32 seqNo, UA_Boolean
     }
     return deletedItems;
 }
-
 
 static void Subscription_timedUpdateNotificationsJob(UA_Server *server, void *data) {
     // Timed-Worker/Job Version of updateNotifications
@@ -233,6 +228,8 @@ UA_StatusCode Subscription_registerUpdateJob(UA_Server *server, UA_Subscription 
 }
 
 UA_StatusCode Subscription_unregisterUpdateJob(UA_Server *server, UA_Subscription *sub) {
+    if(!sub->timedUpdateIsRegistered)
+        return UA_STATUSCODE_GOOD;
     sub->timedUpdateIsRegistered = false;
     return UA_Server_removeRepeatedJob(server, sub->timedUpdateJobGuid);
 }
@@ -243,7 +240,8 @@ UA_StatusCode Subscription_unregisterUpdateJob(UA_Server *server, UA_Subscriptio
 
 UA_MonitoredItem * UA_MonitoredItem_new() {
     UA_MonitoredItem *new = UA_malloc(sizeof(UA_MonitoredItem));
-    new->queueSize = (UA_BoundedUInt32) { .min = 0, .max = 0, .current = 0};
+    new->currentQueueSize = 0;
+    new->maxQueueSize = 0;
     // FIXME: This is currently hardcoded;
     new->monitoredItemType = MONITOREDITEM_TYPE_CHANGENOTIFY;
     TAILQ_INIT(&new->queue);
@@ -255,7 +253,7 @@ UA_MonitoredItem * UA_MonitoredItem_new() {
 }
 
 void MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem) {
-    MonitoredItem_unregisterUpdateJob(server, monitoredItem);
+    MonitoredItem_unregisterSampleJob(server, monitoredItem);
     MonitoredItem_ClearQueue(monitoredItem);
     LIST_REMOVE(monitoredItem, listEntry);
     UA_ByteString_deleteMembers(&monitoredItem->lastSampledValue);
@@ -291,11 +289,10 @@ void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem) {
         UA_DataValue_deleteMembers(&val->value);
         UA_free(val);
     }
-    monitoredItem->queueSize.current = 0;
+    monitoredItem->currentQueueSize = 0;
 }
 
-UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, const UA_Node *src,
-                                                     UA_DataValue *dst) {
+UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, const UA_Node *src, UA_DataValue *dst) {
     UA_Boolean samplingError = true; 
     UA_DataValue sourceDataValue;
     UA_DataValue_init(&sourceDataValue);
@@ -395,10 +392,6 @@ UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, cons
 }
 
 void MonitoredItem_QueuePushDataValue(UA_Server *server, UA_MonitoredItem *monitoredItem) {
-  
-    /* if(monitoredItem->lastSampled + (UA_MSEC_TO_DATETIME * monitoredItem->samplingInterval) > UA_DateTime_now()) */
-    /*     return; */
-  
     // FIXME: Actively suppress non change value based monitoring. There should be
     // another function to handle status and events.
     if(monitoredItem->monitoredItemType != MONITOREDITEM_TYPE_CHANGENOTIFY)
@@ -451,7 +444,7 @@ void MonitoredItem_QueuePushDataValue(UA_Server *server, UA_MonitoredItem *monit
     }
   
     /* do we have space? */
-    if(monitoredItem->queueSize.current >= monitoredItem->queueSize.max) {
+    if(monitoredItem->currentQueueSize >= monitoredItem->maxQueueSize) {
         if(!monitoredItem->discardOldest) {
             // We cannot remove the oldest value and theres no queue space left. We're done here.
             UA_DataValue_deleteMembers(&newvalue->value);
@@ -462,14 +455,14 @@ void MonitoredItem_QueuePushDataValue(UA_Server *server, UA_MonitoredItem *monit
         MonitoredItem_queuedValue *queueItem = TAILQ_LAST(&monitoredItem->queue, QueueOfQueueDataValues);
         TAILQ_REMOVE(&monitoredItem->queue, queueItem, listEntry);
         UA_free(queueItem);
-        monitoredItem->queueSize.current--;
+        monitoredItem->currentQueueSize--;
     }
   
     /* add the sample */
     UA_ByteString_deleteMembers(&monitoredItem->lastSampledValue);
     monitoredItem->lastSampledValue = newValueAsByteString;
     TAILQ_INSERT_HEAD(&monitoredItem->queue, newvalue, listEntry);
-    monitoredItem->queueSize.current++;
+    monitoredItem->currentQueueSize++;
 }
 
 UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredItem *mon) {
@@ -487,7 +480,9 @@ UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredIte
     return retval;
 }
 
-UA_StatusCode MonitoredItem_unregisterUpdateJob(UA_Server *server, UA_MonitoredItem *mon) {
+UA_StatusCode MonitoredItem_unregisterSampleJob(UA_Server *server, UA_MonitoredItem *mon) {
+    if(!mon->sampleJobIsRegistered)
+        return UA_STATUSCODE_GOOD;
     mon->sampleJobIsRegistered = false;
     return UA_Server_removeRepeatedJob(server, mon->sampleJobGuid);
 }
