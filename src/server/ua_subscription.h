@@ -46,11 +46,6 @@ typedef struct UA_MonitoredItem {
 UA_MonitoredItem *UA_MonitoredItem_new(void);
 void MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem);
 void MonitoredItem_QueuePushDataValue(UA_Server *server, UA_MonitoredItem *monitoredItem);
-void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem);
-UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, const UA_Node *src,
-                                                     UA_DataValue *dst);
-UA_UInt32 MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotification *dst,
-                                                       UA_MonitoredItem *monitoredItem);
 
 UA_StatusCode MonitoredItem_unregisterSampleJob(UA_Server *server, UA_MonitoredItem *mon);
 UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredItem *mon);
@@ -90,10 +85,8 @@ void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *ser
 void Subscription_updateNotifications(UA_Subscription *subscription);
 UA_UInt32 *Subscription_getAvailableSequenceNumbers(UA_Subscription *sub);
 void Subscription_generateKeepAlive(UA_Subscription *subscription);
-void Subscription_copyTopNotificationMessage(UA_NotificationMessage *dst, UA_Subscription *sub);
 UA_UInt32 Subscription_deleteUnpublishedNotification(UA_UInt32 seqNo, UA_Boolean bDeleteAll, UA_Subscription *sub);
 void Subscription_copyNotificationMessage(UA_NotificationMessage *dst, UA_unpublishedNotification *src);
-UA_StatusCode Subscription_createdUpdateJob(UA_Server *server, UA_Guid jobId, UA_Subscription *sub);
 UA_StatusCode Subscription_registerUpdateJob(UA_Server *server, UA_Subscription *sub);
 UA_StatusCode Subscription_unregisterUpdateJob(UA_Server *server, UA_Subscription *sub);
 

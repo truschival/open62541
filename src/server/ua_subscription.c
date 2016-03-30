@@ -2,6 +2,12 @@
 #include "ua_server_internal.h"
 #include "ua_nodestore.h"
 
+static UA_UInt32
+MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotification *dst,
+                                             UA_MonitoredItem *monitoredItem);
+
+static void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem);
+
 /****************/
 /* Subscription */
 /****************/
@@ -261,8 +267,9 @@ void MonitoredItem_delete(UA_Server *server, UA_MonitoredItem *monitoredItem) {
     UA_free(monitoredItem);
 }
 
-UA_UInt32 MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotification *dst,
-                                                       UA_MonitoredItem *monitoredItem) {
+static UA_UInt32
+MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotification *dst,
+                                             UA_MonitoredItem *monitoredItem) {
     UA_UInt32 queueSize = 0;
     MonitoredItem_queuedValue *queueItem;
   
@@ -282,7 +289,7 @@ UA_UInt32 MonitoredItem_QueueToDataChangeNotifications(UA_MonitoredItemNotificat
     return queueSize;
 }
 
-void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem) {
+static void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem) {
     MonitoredItem_queuedValue *val, *val_tmp;
     TAILQ_FOREACH_SAFE(val, &monitoredItem->queue, listEntry, val_tmp) {
         TAILQ_REMOVE(&monitoredItem->queue, val, listEntry);
@@ -292,7 +299,9 @@ void MonitoredItem_ClearQueue(UA_MonitoredItem *monitoredItem) {
     monitoredItem->currentQueueSize = 0;
 }
 
-UA_Boolean MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, const UA_Node *src, UA_DataValue *dst) {
+static UA_Boolean
+MonitoredItem_CopyMonitoredValueToVariant(UA_UInt32 attributeID, const UA_Node *src,
+                                          UA_DataValue *dst) {
     UA_Boolean samplingError = true; 
     UA_DataValue sourceDataValue;
     UA_DataValue_init(&sourceDataValue);
