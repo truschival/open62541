@@ -22,8 +22,8 @@ UA_Subscription *UA_Subscription_new(UA_Session *session, UA_UInt32 subscription
     new->sequenceNumber = 1;
     new->currentKeepAliveCount = 0;
     new->maxKeepAliveCount = 0;
-    memset(&new->timedUpdateJobGuid, 0, sizeof(UA_Guid));
-    new->timedUpdateIsRegistered = false;
+    memset(&new->publishJobGuid, 0, sizeof(UA_Guid));
+    new->publishJobIsRegistered = false;
     LIST_INIT(&new->MonitoredItems);
     LIST_INIT(&new->unpublishedNotifications);
     new->unpublishedNotificationsSize = 0;
@@ -34,7 +34,7 @@ void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *ser
     // Just in case any parallel process attempts to access this subscription
     // while we are deleting it... make it vanish.
     subscription->subscriptionID = 0;
-    Subscription_unregisterUpdateJob(server, subscription);
+    Subscription_unregisterPublishJob(server, subscription);
     
     /* Delete monitored Items */
     UA_MonitoredItem *mon, *tmp_mon;
@@ -215,7 +215,7 @@ static void Subscription_timedUpdateNotificationsJob(UA_Server *server, void *da
     Subscription_updateNotifications(sub);
 }
 
-UA_StatusCode Subscription_registerUpdateJob(UA_Server *server, UA_Subscription *sub) {
+UA_StatusCode Subscription_registerPublishJob(UA_Server *server, UA_Subscription *sub) {
     if(sub->publishingInterval <= 5 ) 
         return UA_STATUSCODE_BADNOTSUPPORTED;
 
@@ -227,17 +227,17 @@ UA_StatusCode Subscription_registerUpdateJob(UA_Server *server, UA_Subscription 
        datetime, which here is required in as uint32 in ms as the interval */
     UA_StatusCode retval = UA_Server_addRepeatedJob(server, job,
                                                     (UA_UInt32)sub->publishingInterval,
-                                                    &sub->timedUpdateJobGuid);
+                                                    &sub->publishJobGuid);
     if(retval == UA_STATUSCODE_GOOD)
-        sub->timedUpdateIsRegistered = true;
+        sub->publishJobIsRegistered = true;
     return retval;
 }
 
-UA_StatusCode Subscription_unregisterUpdateJob(UA_Server *server, UA_Subscription *sub) {
-    if(!sub->timedUpdateIsRegistered)
+UA_StatusCode Subscription_unregisterPublishJob(UA_Server *server, UA_Subscription *sub) {
+    if(!sub->publishJobIsRegistered)
         return UA_STATUSCODE_GOOD;
-    sub->timedUpdateIsRegistered = false;
-    return UA_Server_removeRepeatedJob(server, sub->timedUpdateJobGuid);
+    sub->publishJobIsRegistered = false;
+    return UA_Server_removeRepeatedJob(server, sub->publishJobGuid);
 }
 
 /*****************/

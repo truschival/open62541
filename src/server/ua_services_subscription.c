@@ -14,7 +14,7 @@ setSubscriptionSettings(UA_Server *server, UA_Subscription *subscription,
                         UA_UInt32 requestedLifetimeCount,
                         UA_UInt32 requestedMaxKeepAliveCount,
                         UA_UInt32 maxNotificationsPerPublish, UA_Byte priority) {
-    Subscription_unregisterUpdateJob(server, subscription);
+    Subscription_unregisterPublishJob(server, subscription);
     UA_BOUNDEDVALUE_SETWBOUNDS(server->config.publishingIntervalLimits,
                                requestedPublishingInterval, subscription->publishingInterval);
     UA_BOUNDEDVALUE_SETWBOUNDS(server->config.lifeTimeCountLimits,
@@ -23,7 +23,7 @@ setSubscriptionSettings(UA_Server *server, UA_Subscription *subscription,
                                requestedMaxKeepAliveCount, subscription->maxKeepAliveCount);
     subscription->notificationsPerPublish = maxNotificationsPerPublish;
     subscription->priority = priority;
-    Subscription_registerUpdateJob(server, subscription);
+    Subscription_registerPublishJob(server, subscription);
 }
 
 void Service_CreateSubscription(UA_Server *server, UA_Session *session,
@@ -169,7 +169,7 @@ Service_Publish(UA_Server *server, UA_Session *session, const UA_PublishRequest 
     // See if any new data is available
     UA_Subscription *sub;
     LIST_FOREACH(sub, &session->serverSubscriptions, listEntry) {
-        if(sub->timedUpdateIsRegistered == false) {
+        if(sub->publishJobIsRegistered == false) {
             // FIXME: We are forcing a value update for monitored items. This should be done by the event system.
             // NOTE:  There is a clone of this functionality in the Subscription_timedUpdateNotificationsJob
             // done by the sampling job

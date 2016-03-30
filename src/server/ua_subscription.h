@@ -73,8 +73,8 @@ struct UA_Subscription {
     UA_Boolean publishingMode;
     UA_UInt32 priority;
     UA_UInt32 sequenceNumber;
-    UA_Guid timedUpdateJobGuid;
-    UA_Boolean timedUpdateIsRegistered;
+    UA_Guid publishJobGuid;
+    UA_Boolean publishJobIsRegistered;
     LIST_HEAD(UA_ListOfUnpublishedNotifications, UA_unpublishedNotification) unpublishedNotifications;
     size_t unpublishedNotificationsSize;
     LIST_HEAD(UA_ListOfUAMonitoredItems, UA_MonitoredItem) MonitoredItems;
@@ -87,7 +87,8 @@ UA_UInt32 *Subscription_getAvailableSequenceNumbers(UA_Subscription *sub);
 void Subscription_generateKeepAlive(UA_Subscription *subscription);
 UA_UInt32 Subscription_deleteUnpublishedNotification(UA_UInt32 seqNo, UA_Boolean bDeleteAll, UA_Subscription *sub);
 void Subscription_copyNotificationMessage(UA_NotificationMessage *dst, UA_unpublishedNotification *src);
-UA_StatusCode Subscription_registerUpdateJob(UA_Server *server, UA_Subscription *sub);
-UA_StatusCode Subscription_unregisterUpdateJob(UA_Server *server, UA_Subscription *sub);
+
+UA_StatusCode Subscription_registerPublishJob(UA_Server *server, UA_Subscription *sub);
+UA_StatusCode Subscription_unregisterPublishJob(UA_Server *server, UA_Subscription *sub);
 
 #endif /* UA_SUBSCRIPTION_H_ */
