@@ -143,95 +143,40 @@ void Service_CreateMonitoredItems(UA_Server *server, UA_Session *session,
 void
 Service_Publish(UA_Server *server, UA_Session *session, const UA_PublishRequest *request,
                 UA_UInt32 requestId) {
-    UA_PublishResponse response;
-    UA_PublishResponse_init(&response);
-    response.responseHeader.requestHandle = request->requestHeader.requestHandle;
-    response.responseHeader.timestamp = UA_DateTime_now();
-    
-    // Delete Acknowledged Subscription Messages
-    response.resultsSize = request->subscriptionAcknowledgementsSize;
-    response.results = UA_calloc(response.resultsSize, sizeof(UA_StatusCode));
-    for(size_t i = 0; i < request->subscriptionAcknowledgementsSize; i++) {
-        response.results[i] = UA_STATUSCODE_GOOD;
-        UA_UInt32 sid = request->subscriptionAcknowledgements[i].subscriptionId;
-        UA_Subscription *sub = UA_Session_getSubscriptionByID(session, sid);
-        if(!sub) {
-            response.results[i] = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
-            continue;
-        }
-        UA_UInt32 sn = request->subscriptionAcknowledgements[i].sequenceNumber;
-        if(Subscription_deleteUnpublishedNotification(sn, false, sub) == 0)
-            response.results[i] = UA_STATUSCODE_BADSEQUENCENUMBERINVALID;
-    }
-    
-    UA_Boolean have_response = false;
+    // todo error handling for malloc
+    UA_PublishResponseEntry *entry = UA_malloc(sizeof(UA_PublishResponseEntry));
+    entry->requestId = requestId;
+    UA_PublishResponse *response = &entry->response;
+    UA_PublishResponse_init(response);
+    response->responseHeader.requestHandle = request->requestHeader.requestHandle;
 
-    // See if any new data is available
-    UA_Subscription *sub;
-    LIST_FOREACH(sub, &session->serverSubscriptions, listEntry) {
-        if(sub->publishJobIsRegistered == false) {
-            // FIXME: We are forcing a value update for monitored items. This should be done by the event system.
-            // NOTE:  There is a clone of this functionality in the Subscription_timedUpdateNotificationsJob
-            // done by the sampling job
-            /* UA_MonitoredItem *mon; */
-            /* LIST_FOREACH(mon, &sub->MonitoredItems, listEntry) */
-            /*     MonitoredItem_QueuePushDataValue(server, mon); */
-            
-            // FIXME: We are forcing notification updates for the subscription. This
-            // should be done by a timed work item.
-            Subscription_updateNotifications(sub);
-        }
-        
-        if(sub->unpublishedNotificationsSize == 0)
+    /* Delete Acknowledged Subscription Messages */
+    /* todo: error handling for malloc */
+    response->resultsSize = request->subscriptionAcknowledgementsSize;
+    response->results = UA_malloc(response->resultsSize *sizeof(UA_StatusCode));
+    for(size_t i = 0; i < request->subscriptionAcknowledgementsSize; i++) {
+        UA_SubscriptionAcknowledgement *ack = &request->subscriptionAcknowledgements[i];
+        UA_Subscription *sub = UA_Session_getSubscriptionByID(session, ack->subscriptionId);
+        if(!sub) {
+            response->results[i] = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
             continue;
-        
-        // This subscription has notifications in its queue (top NotificationMessage exists in the queue). 
-        // Due to republish, we need to check if there are any unplublished notifications first ()
-        UA_unpublishedNotification *notification = NULL;
-        LIST_FOREACH(notification, &sub->unpublishedNotifications, listEntry) {
-            if (notification->publishedOnce == false)
+        }
+
+        response->results[i] = UA_STATUSCODE_BADSEQUENCENUMBERUNKNOWN;
+        UA_NotificationMessageEntry *pre, *pre_tmp;
+        LIST_FOREACH_SAFE(pre, &sub->retransmissionQueue, listEntry, pre_tmp) {
+            if(pre->message.sequenceNumber == ack->sequenceNumber) {
+                LIST_REMOVE(pre, listEntry);
+                response->results[i] = UA_STATUSCODE_GOOD;
+                UA_NotificationMessage_deleteMembers(&pre->message);
+                UA_free(pre);
                 break;
-        }
-        if (notification == NULL)
-            continue;
-    
-        // We found an unpublished notification message in this subscription, which we will now publish.
-        response.subscriptionId = sub->subscriptionID;
-        Subscription_copyNotificationMessage(&response.notificationMessage, notification);
-        // Mark this notification as published
-        notification->publishedOnce = true;
-        if(notification->notification.sequenceNumber > sub->sequenceNumber) {
-            // If this is a keepalive message, its seqNo is the next seqNo to be used for an actual msg.
-            response.availableSequenceNumbersSize = 0;
-            // .. and must be deleted
-            Subscription_deleteUnpublishedNotification(sub->sequenceNumber + 1, false, sub);
-        } else {
-            response.availableSequenceNumbersSize = sub->unpublishedNotificationsSize;
-            response.availableSequenceNumbers = Subscription_getAvailableSequenceNumbers(sub);
-        }	  
-        have_response = true;
-    }
-    
-    if(!have_response) {
-        // FIXME: At this point, we would return nothing and "queue" the publish
-        // request, but currently we need to return something to the client. If no
-        // subscriptions have notifications, force one to generate a keepalive so we
-        // don't return an empty message
-        sub = LIST_FIRST(&session->serverSubscriptions);
-        if(sub) {
-            response.subscriptionId = sub->subscriptionID;
-            Subscription_generateKeepAlive(sub);
-            Subscription_copyNotificationMessage(&response.notificationMessage,
-                                                 LIST_FIRST(&sub->unpublishedNotifications));
-            Subscription_deleteUnpublishedNotification(sub->sequenceNumber + 1, false, sub);
+            }
         }
     }
-    
-    UA_SecureChannel *channel = session->channel;
-    if(channel)
-        UA_SecureChannel_sendBinaryMessage(channel, requestId, &response,
-                                           &UA_TYPES[UA_TYPES_PUBLISHRESPONSE]);
-    UA_PublishResponse_deleteMembers(&response);
+
+    /* Queue the publish response */
+    SIMPLEQ_INSERT_TAIL(&session->responseQueue, entry, listEntry);
 }
 
 void Service_DeleteSubscriptions(UA_Server *server, UA_Session *session,
@@ -265,8 +210,8 @@ void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
     response->resultsSize = request->monitoredItemIdsSize;
 
     for(size_t i = 0; i < request->monitoredItemIdsSize; i++)
-        response->results[i] =
-            UA_Session_deleteMonitoredItem(server, session, sub->subscriptionID, request->monitoredItemIds[i]);
+        response->results[i] = UA_Session_deleteMonitoredItem(server, session, sub->subscriptionID,
+                                                              request->monitoredItemIds[i]);
 }
 
 void Service_Republish(UA_Server *server, UA_Session *session, const UA_RepublishRequest *request,
@@ -278,15 +223,15 @@ void Service_Republish(UA_Server *server, UA_Session *session, const UA_Republis
     }
     
     // Find the notification in question
-    UA_unpublishedNotification *notification;
-    LIST_FOREACH(notification, &sub->unpublishedNotifications, listEntry) {
-        if(notification->notification.sequenceNumber == request->retransmitSequenceNumber)
-            break;
-    }
-    if(!notification) {
-      response->responseHeader.serviceResult = UA_STATUSCODE_BADSEQUENCENUMBERINVALID;
-      return;
-    }
+    /* UA_unpublishedNotification *notification; */
+    /* LIST_FOREACH(notification, &sub->unpublishedNotifications, listEntry) { */
+    /*     if(notification->notification.sequenceNumber == request->retransmitSequenceNumber) */
+    /*         break; */
+    /* } */
+    /* if(!notification) { */
+    /*   response->responseHeader.serviceResult = UA_STATUSCODE_BADSEQUENCENUMBERINVALID; */
+    /*   return; */
+    /* } */
     
     // FIXME: By spec, this notification has to be in the "retransmit queue", i.e. publishedOnce must be
     //        true. If this is not tested, the client just gets what he asks for... hence this part is
@@ -298,9 +243,6 @@ void Service_Republish(UA_Server *server, UA_Session *session, const UA_Republis
     }
     */
     // Retransmit 
-    Subscription_copyNotificationMessage(&response->notificationMessage, notification);
+    //Subscription_copyNotificationMessage(&response->notificationMessage, notification);
     // Mark this notification as published
-    notification->publishedOnce = true;
-    
-    return;
 }

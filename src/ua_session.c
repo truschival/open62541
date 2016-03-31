@@ -30,8 +30,9 @@ void UA_Session_init(UA_Session *session) {
     UA_DateTime_init(&session->validTill);
     session->channel = NULL;
 #ifdef UA_ENABLE_SUBSCRIPTIONS
-    LIST_INIT(&session->serverSubscriptions);
     session->lastSubscriptionID = UA_UInt32_random();
+    LIST_INIT(&session->serverSubscriptions);
+    SIMPLEQ_INIT(&session->responseQueue);
 #endif
     session->availableContinuationPoints = MAXCONTINUATIONPOINTS;
     LIST_INIT(&session->continuationPoints);
@@ -52,11 +53,20 @@ void UA_Session_deleteMembersCleanup(UA_Session *session, UA_Server* server) {
     if(session->channel)
         UA_SecureChannel_detachSession(session->channel, session);
 #ifdef UA_ENABLE_SUBSCRIPTIONS
+    /* Delete Subscriptions */
     UA_Subscription *currents, *temps;
     LIST_FOREACH_SAFE(currents, &session->serverSubscriptions, listEntry, temps) {
         LIST_REMOVE(currents, listEntry);
         UA_Subscription_deleteMembers(currents, server);
         UA_free(currents);
+    }
+
+    /* Delete Queued Publish Responses */
+    UA_PublishResponseEntry *pre;
+    while((pre = SIMPLEQ_FIRST(&session->responseQueue))) {
+        SIMPLEQ_REMOVE_HEAD(&session->responseQueue, listEntry);
+        UA_PublishResponse_deleteMembers(&pre->response);
+        UA_free(pre);
     }
 #endif
 }
