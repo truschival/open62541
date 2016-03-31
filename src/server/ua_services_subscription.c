@@ -216,33 +216,22 @@ void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
 
 void Service_Republish(UA_Server *server, UA_Session *session, const UA_RepublishRequest *request,
                        UA_RepublishResponse *response) {
+    /* get the subscription */
     UA_Subscription *sub = UA_Session_getSubscriptionByID(session, request->subscriptionId);
     if (!sub) {
         response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
         return;
     }
     
-    // Find the notification in question
-    /* UA_unpublishedNotification *notification; */
-    /* LIST_FOREACH(notification, &sub->unpublishedNotifications, listEntry) { */
-    /*     if(notification->notification.sequenceNumber == request->retransmitSequenceNumber) */
-    /*         break; */
-    /* } */
-    /* if(!notification) { */
-    /*   response->responseHeader.serviceResult = UA_STATUSCODE_BADSEQUENCENUMBERINVALID; */
-    /*   return; */
-    /* } */
-    
-    // FIXME: By spec, this notification has to be in the "retransmit queue", i.e. publishedOnce must be
-    //        true. If this is not tested, the client just gets what he asks for... hence this part is
-    //        commented:
-    /* Check if the notification is in the published queue
-    if (notification->publishedOnce == false) {
-      response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
-      return;
+    /* Find the notification in the retransmission queue  */
+    UA_NotificationMessageEntry *entry;
+    LIST_FOREACH(entry, &sub->retransmissionQueue, listEntry) {
+        if(entry->message.sequenceNumber == request->retransmitSequenceNumber)
+            break;
     }
-    */
-    // Retransmit 
-    //Subscription_copyNotificationMessage(&response->notificationMessage, notification);
-    // Mark this notification as published
+    if(entry)
+        response->responseHeader.serviceResult =
+            UA_NotificationMessage_copy(&entry->message, &response->notificationMessage);
+    else
+      response->responseHeader.serviceResult = UA_STATUSCODE_BADSEQUENCENUMBERINVALID;
 }
