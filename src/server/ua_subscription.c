@@ -101,9 +101,6 @@ static void SampleCallback(UA_Server *server, UA_MonitoredItem *monitoredItem) {
 }
 
 UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredItem *mon) {
-    if(mon->samplingInterval < 5 ) 
-        return UA_STATUSCODE_BADNOTSUPPORTED;
-
     UA_Job job = (UA_Job) {.type = UA_JOBTYPE_METHODCALL,
                            .job.methodCall = {.method = (UA_ServerCallback)SampleCallback,
                                               .data = mon} };
@@ -251,8 +248,6 @@ static void PublishCallback(UA_Server *server, UA_Subscription *sub) {
 }
 
 UA_StatusCode Subscription_registerPublishJob(UA_Server *server, UA_Subscription *sub) {
-    if(sub->publishingInterval <= 5 ) 
-        return UA_STATUSCODE_BADNOTSUPPORTED;
     UA_Job job = (UA_Job) {.type = UA_JOBTYPE_METHODCALL,
                            .job.methodCall = {.method = (UA_ServerCallback)PublishCallback, .data = sub} };
     UA_StatusCode retval = UA_Server_addRepeatedJob(server, job,
