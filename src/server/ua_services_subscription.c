@@ -78,9 +78,9 @@ setMonitoredItemSettings(UA_Server *server, UA_MonitoredItem *mon,
 }
 
 static void
-createMonitoredItem(UA_Server *server, UA_Session *session, UA_Subscription *sub,
-                    const UA_MonitoredItemCreateRequest *request,
-                    UA_MonitoredItemCreateResult *result) {
+Service_CreateMonitoredItems_single(UA_Server *server, UA_Session *session, UA_Subscription *sub,
+                                    const UA_MonitoredItemCreateRequest *request,
+                                    UA_MonitoredItemCreateResult *result) {
     const UA_Node *target = UA_NodeStore_get(server->nodestore, &request->itemToMonitor.nodeId);
     if(!target) {
         result->statusCode = UA_STATUSCODE_BADNODEIDINVALID;
@@ -115,9 +115,10 @@ createMonitoredItem(UA_Server *server, UA_Session *session, UA_Subscription *sub
     // todo: add a pointer to the monitoreditem to the variable, so that events get propagated
 }
 
-void Service_CreateMonitoredItems(UA_Server *server, UA_Session *session,
-                                  const UA_CreateMonitoredItemsRequest *request,
-                                  UA_CreateMonitoredItemsResponse *response) {
+void
+Service_CreateMonitoredItems(UA_Server *server, UA_Session *session,
+                             const UA_CreateMonitoredItemsRequest *request,
+                             UA_CreateMonitoredItemsResponse *response) {
     UA_Subscription *sub = UA_Session_getSubscriptionByID(session, request->subscriptionId);
     if(!sub) {
         response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
@@ -129,7 +130,8 @@ void Service_CreateMonitoredItems(UA_Server *server, UA_Session *session,
         return;
     }
 
-    response->results = UA_Array_new(request->itemsToCreateSize, &UA_TYPES[UA_TYPES_MONITOREDITEMCREATERESULT]);
+    response->results = UA_Array_new(request->itemsToCreateSize,
+                                     &UA_TYPES[UA_TYPES_MONITOREDITEMCREATERESULT]);
     if(!response->results) {
         response->responseHeader.serviceResult = UA_STATUSCODE_BADOUTOFMEMORY;
         return;
@@ -137,7 +139,56 @@ void Service_CreateMonitoredItems(UA_Server *server, UA_Session *session,
     response->resultsSize = request->itemsToCreateSize;
 
     for(size_t i = 0; i < request->itemsToCreateSize; i++)
-        createMonitoredItem(server, session, sub, &request->itemsToCreate[i], &response->results[i]);
+        Service_CreateMonitoredItems_single(server, session, sub,
+                                            &request->itemsToCreate[i],
+                                            &response->results[i]);
+}
+
+static void
+Service_ModifyMonitoredItems_single(UA_Server *server, UA_Session *session, UA_Subscription *sub,
+                                    const UA_MonitoredItemModifyRequest *request,
+                                    UA_MonitoredItemModifyResult *result) {
+    UA_MonitoredItem *mon = UA_Subscription_getMonitoredItem(sub, request->monitoredItemId);
+    if(!mon) {
+        result->statusCode = UA_STATUSCODE_BADMONITOREDITEMIDINVALID;
+        return;
+    }
+    setMonitoredItemSettings(server, mon, MONITOREDITEM_TYPE_CHANGENOTIFY,
+                             request->requestedParameters.clientHandle,
+                             request->requestedParameters.samplingInterval,
+                             request->requestedParameters.queueSize,
+                             request->requestedParameters.discardOldest);
+    result->revisedSamplingInterval = mon->samplingInterval;
+    result->revisedQueueSize = mon->maxQueueSize;
+}
+
+void Service_ModifyMonitoredItems(UA_Server *server, UA_Session *session,
+                                  const UA_ModifyMonitoredItemsRequest *request,
+                                  UA_ModifyMonitoredItemsResponse *response) {
+    UA_Subscription *sub = UA_Session_getSubscriptionByID(session, request->subscriptionId);
+    if(!sub) {
+        response->responseHeader.serviceResult = UA_STATUSCODE_BADSUBSCRIPTIONIDINVALID;
+        return;
+    }
+    
+    if(request->itemsToModifySize <= 0) {
+        response->responseHeader.serviceResult = UA_STATUSCODE_BADNOTHINGTODO;
+        return;
+    }
+
+    response->results = UA_Array_new(request->itemsToModifySize,
+                                     &UA_TYPES[UA_TYPES_MONITOREDITEMMODIFYRESULT]);
+    if(!response->results) {
+        response->responseHeader.serviceResult = UA_STATUSCODE_BADOUTOFMEMORY;
+        return;
+    }
+    response->resultsSize = request->itemsToModifySize;
+
+    for(size_t i = 0; i < request->itemsToModifySize; i++)
+        Service_ModifyMonitoredItems_single(server, session, sub,
+                                            &request->itemsToModify[i],
+                                            &response->results[i]);
+
 }
 
 void
@@ -210,8 +261,7 @@ void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
     response->resultsSize = request->monitoredItemIdsSize;
 
     for(size_t i = 0; i < request->monitoredItemIdsSize; i++)
-        response->results[i] = UA_Session_deleteMonitoredItem(server, session, sub->subscriptionID,
-                                                              request->monitoredItemIds[i]);
+        response->results[i] = UA_Subscription_deleteMonitoredItem(server, sub, request->monitoredItemIds[i]);
 }
 
 void Service_Republish(UA_Server *server, UA_Session *session, const UA_RepublishRequest *request,

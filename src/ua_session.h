@@ -62,10 +62,6 @@ UA_Subscription *
 UA_Session_getSubscriptionByID(UA_Session *session, UA_UInt32 subscriptionID);
 
 UA_StatusCode
-UA_Session_deleteMonitoredItem(UA_Server *server, UA_Session *session,
-                               UA_UInt32 subscriptionID, UA_UInt32 monitoredItemID);
-
-UA_StatusCode
 UA_Session_deleteSubscription(UA_Server *server, UA_Session *session,
                               UA_UInt32 subscriptionID);
 

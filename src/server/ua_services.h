@@ -272,7 +272,11 @@ void Service_DeleteMonitoredItems(UA_Server *server, UA_Session *session,
                                   const UA_DeleteMonitoredItemsRequest *request,
                                   UA_DeleteMonitoredItemsResponse *response);
 
-/* Not Implemented: Service_ModifyMonitoredItems */
+/* This Service is used to modify a Subscription. */
+void Service_ModifyMonitoredItems(UA_Server *server, UA_Session *session,
+                                  const UA_ModifyMonitoredItemsRequest *request,
+                                  UA_ModifyMonitoredItemsResponse *response);
+
 /* Not Implemented: Service_SetMonitoringMode */
 /* Not Implemented: Service_SetTriggering */
 

@@ -251,6 +251,11 @@ getServicePointers(UA_UInt32 requestTypeId, const UA_DataType **requestType,
         *requestType = &UA_TYPES[UA_TYPES_CREATEMONITOREDITEMSREQUEST];
         *responseType = &UA_TYPES[UA_TYPES_CREATEMONITOREDITEMSRESPONSE];
         break;
+    case UA_NS0ID_MODIFYMONITOREDITEMSREQUEST:
+        *service = (UA_Service)Service_ModifyMonitoredItems;
+        *requestType = &UA_TYPES[UA_TYPES_MODIFYMONITOREDITEMSREQUEST];
+        *responseType = &UA_TYPES[UA_TYPES_MODIFYMONITOREDITEMSRESPONSE];
+        break;
     case UA_NS0ID_DELETEMONITOREDITEMSREQUEST:
         *service = (UA_Service)Service_DeleteMonitoredItems;
         *requestType = &UA_TYPES[UA_TYPES_DELETEMONITOREDITEMSREQUEST];

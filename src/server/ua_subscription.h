@@ -93,4 +93,12 @@ void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *ser
 UA_StatusCode Subscription_registerPublishJob(UA_Server *server, UA_Subscription *sub);
 UA_StatusCode Subscription_unregisterPublishJob(UA_Server *server, UA_Subscription *sub);
 
+UA_StatusCode
+UA_Subscription_deleteMonitoredItem(UA_Server *server, UA_Subscription *sub,
+                                    UA_UInt32 monitoredItemID);
+
+UA_MonitoredItem *
+UA_Subscription_getMonitoredItem(UA_Subscription *sub, UA_UInt32 monitoredItemID);
+
+
 #endif /* UA_SUBSCRIPTION_H_ */

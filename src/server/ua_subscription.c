@@ -101,10 +101,8 @@ static void SampleCallback(UA_Server *server, UA_MonitoredItem *monitoredItem) {
 }
 
 UA_StatusCode MonitoredItem_registerSampleJob(UA_Server *server, UA_MonitoredItem *mon) {
-    UA_Job job = (UA_Job) {.type = UA_JOBTYPE_METHODCALL,
-                           .job.methodCall = {.method = (UA_ServerCallback)SampleCallback,
-                                              .data = mon} };
-    
+    UA_Job job = {.type = UA_JOBTYPE_METHODCALL,
+                  .job.methodCall = {.method = (UA_ServerCallback)SampleCallback, .data = mon} };
     UA_StatusCode retval = UA_Server_addRepeatedJob(server, job, (UA_UInt32)mon->samplingInterval,
                                                     &mon->sampleJobGuid);
     if(retval == UA_STATUSCODE_GOOD)
@@ -156,6 +154,29 @@ void UA_Subscription_deleteMembers(UA_Subscription *subscription, UA_Server *ser
         UA_NotificationMessage_deleteMembers(&nme->message);
         UA_free(nme);
     }
+}
+
+UA_MonitoredItem *
+UA_Subscription_getMonitoredItem(UA_Subscription *sub, UA_UInt32 monitoredItemID) {
+    UA_MonitoredItem *mon;
+    LIST_FOREACH(mon, &sub->MonitoredItems, listEntry) {
+        if(mon->itemId == monitoredItemID)
+            break;
+    }
+    return mon;
+}
+
+UA_StatusCode
+UA_Subscription_deleteMonitoredItem(UA_Server *server, UA_Subscription *sub, UA_UInt32 monitoredItemID) {
+    UA_MonitoredItem *mon;
+    LIST_FOREACH(mon, &sub->MonitoredItems, listEntry) {
+        if(mon->itemId == monitoredItemID) {
+            LIST_REMOVE(mon, listEntry);
+            MonitoredItem_delete(server, mon);
+            return UA_STATUSCODE_GOOD;
+        }
+    }
+    return UA_STATUSCODE_BADMONITOREDITEMIDINVALID;
 }
 
 static void PublishCallback(UA_Server *server, UA_Subscription *sub) {
