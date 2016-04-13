@@ -1,7 +1,7 @@
 <UANodeSet xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:uax="http://opcfoundation.org/UA/2008/02/Types.xsd" xmlns="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd" xmlns:s1="http://festo.com/DI_test/Types.xsd" xmlns:s2="http://opcfoundation.org/UA/DI/Types.xsd" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <NamespaceUris>
-        <Uri>http://festo.com/DI_test/</Uri>
         <Uri>http://opcfoundation.org/UA/DI/</Uri>
+        <Uri>http://festo.com/DI_test/</Uri>
     </NamespaceUris>
     <Aliases>
         <Alias Alias="HasSubtype">i=45</Alias>
@@ -11,11 +11,11 @@
             <ModelInfo Tool="UaModeler" Hash="IoOM2U7UwUN6RP1vvN3tkw==" Version="1.4.2"/>
         </Extension>
     </Extensions>
-    <UAObjectType NodeId="ns=1;i=1502" BrowseName="1:AcmeDev">
+    <UAObjectType NodeId="ns=2;i=1502" BrowseName="2:AcmeDev">
         <DisplayName>AcmeDev</DisplayName>
         <Description>Any device by acme company</Description>
         <References>
-            <Reference ReferenceType="HasSubtype" IsForward="false">ns=2;i=1002</Reference>
+            <Reference ReferenceType="HasSubtype" IsForward="false">ns=1;i=1002</Reference>
         </References>
     </UAObjectType>
 </UANodeSet>
