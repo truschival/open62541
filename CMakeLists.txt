@@ -91,7 +91,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR "x${CMAKE_C_COMPILER_ID}" STREQUAL "xClang")
       endif()
     endif()
   endif()
-  
+
   if(APPLE)
     set(CMAKE_MACOSX_RPATH 1)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_DARWIN_C_SOURCE=1")
@@ -459,7 +459,7 @@ if(UA_BUILD_EXAMPLES)
 	if(UA_ENABLE_MULTITHREADING)
 		list(APPEND LIBS urcu-cds urcu urcu-common)
 	endif(UA_ENABLE_MULTITHREADING)
-	
+
     add_executable(server_variable ${PROJECT_SOURCE_DIR}/examples/server_variable.c $<TARGET_OBJECTS:open62541-object>)
 	target_link_libraries(server_variable ${LIBS})
 
@@ -486,7 +486,8 @@ if(UA_BUILD_EXAMPLES)
 					   COMMAND ${PYTHON_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/generate_open62541CCode.py
                                                     -i ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/NodeID_Blacklist_FullNS0.txt
                                                     ${PROJECT_SOURCE_DIR}/tools/schema/namespace0/Opc.Ua.NodeSet2.xml
-                                                    ${PROJECT_SOURCE_DIR}/examples/server_nodeset.xml
+												    ${PROJECT_SOURCE_DIR}/tools/schema/namespaces/Opc_Ua_Di_NodeSet2.xml
+                                                    ${PROJECT_SOURCE_DIR}/examples/DI_Test/di_test.xml
                                                     ${PROJECT_BINARY_DIR}/src_generated/nodeset
 					   DEPENDS ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/generate_open62541CCode.py
 					           ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/logger.py
@@ -496,8 +497,10 @@ if(UA_BUILD_EXAMPLES)
 					           ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/ua_namespace.py
 					           ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/ua_node_types.py
 					           ${PROJECT_SOURCE_DIR}/tools/pyUANamespace/NodeID_Blacklist_FullNS0.txt
-					           ${PROJECT_SOURCE_DIR}/examples/server_nodeset.xml)
-					   
+							   ${PROJECT_SOURCE_DIR}/examples/DI_Test/di_test.xml
+							   #					           ${PROJECT_SOURCE_DIR}/examples/server_nodeset.xml
+							   )
+
 	add_executable(server_nodeset ${PROJECT_SOURCE_DIR}/examples/server_nodeset.c
                                   ${PROJECT_BINARY_DIR}/src_generated/nodeset.c
                                   $<TARGET_OBJECTS:open62541-object>)
